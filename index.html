@@ -92,11 +92,11 @@ function money(v, c) {
   return sign + "$" + (a >= 1e9 ? (a / 1e9).toFixed(1) + "B" : Math.round(a / 1e6).toLocaleString("en-US") + "M");
 }
 function pct(v) { return (v * 100).toFixed(1) + "%"; }
-function change(r, c) {
-  if (r.delta === null) return "";
-  var s = (r.delta >= 0 ? "+" : "") + money(r.delta, c);
-  if (r.pct !== null) s += ", " + (r.pct >= 0 ? "+" : "") + Math.round(r.pct * 100) + "%";
-  return " <span class=\"chg " + (r.delta >= 0 ? "up" : "down") + "\">(" + s + ")</span>";
+function change(delta, ratio, c) {
+  if (delta === null || delta === undefined) return "";
+  var s = (delta >= 0 ? "+" : "") + money(delta, c);
+  if (ratio !== null && ratio !== undefined) s += ", " + (ratio >= 0 ? "+" : "") + Math.round(ratio * 100) + "%";
+  return " <span class=\"chg " + (delta >= 0 ? "up" : "down") + "\">(" + s + ")</span>";
 }
 function item(label, value) { return "<div><dt>" + label + "</dt><dd>" + value + "</dd></div>"; }
 function card(r, c) {
@@ -107,9 +107,9 @@ function card(r, c) {
   var h = "<article class=\"card\"><header><h2>" + esc(r.name) + "</h2><span class=\"code\">" + esc(codes) + "</span></header>";
   h += "<p class=\"status s-" + r.status + "\">" + status + "</p>";
   if (r.ttm !== null) {
-    h += "<dl>" + item("FCF 수익률", "<b>" + pct(r["yield"]) + "</b>") + item("최근 4분기 FCF", money(r.ttm, c));
-    if (r.group === "main") h += item("분기 FCF (전년 같은 분기 대비)", money(r.fcf, c) + change(r, c));
-    else h += item("4분기 FCF 증감 (한 분기 전 대비)", change(r, c) || "-");
+    h += "<dl>" + item("FCF 수익률", "<b>" + pct(r["yield"]) + "</b>") + item("최근 4분기 FCF (그 전 4분기 대비)", money(r.ttm, c) + change(r.ttm_delta, r.ttm_pct, c));
+    if (r.group === "main") h += item("분기 FCF (전년 같은 분기 대비)", money(r.fcf, c) + change(r.delta, r.pct, c));
+    else h += item("4분기 FCF 증감 (한 분기 전 대비)", change(r.delta, r.pct, c) || "-");
     h += item("시총", money(r.cap, c)) + item("PBR", r.pbr === null ? "-" : r.pbr.toFixed(1)) + "</dl>";
     if (r.late) h += "<p class=\"note\">⏳ " + r.quarter + " 값 · 이번 분기 실적 미발표" + (c === "us" ? " 또는 SEC 자료 미반영" : "") + "</p>";
     if (r.warn) h += "<p class=\"note\">⚠ 선수금·계약부채 급증 (영업현금흐름의 절반 이상)</p>";
