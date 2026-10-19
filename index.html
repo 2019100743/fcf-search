@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FCF 검색</title>
+<title>FCF 순위·검색</title>
 <style>
 :root { --bg: #f6f7f9; --card: #fff; --text: #16181d; --muted: #646b78; --line: #e2e5ea;
         --accent: #2457d6; --up: #127a3e; --down: #c0362c; --warn: #9a6200; }
@@ -34,19 +34,42 @@ dt { color: var(--muted); font-size: 12px; }
 dd { margin: 0; font-variant-numeric: tabular-nums; }
 .chg.up { color: var(--up); } .chg.down { color: var(--down); }
 .note { margin: 8px 0 0; font-size: 13px; color: var(--warn); }
+.lists { display: flex; gap: 6px; margin-bottom: 10px; }
+.lists[hidden] { display: none; }
+.list { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card);
+        color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.list[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.rank { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line);
+        border-radius: 12px; overflow: hidden; }
+.rank li + li { border-top: 1px solid var(--line); }
+.rowhead, summary { display: grid; grid-template-columns: 2.4em minmax(0, 1fr) auto 5.4em; gap: 8px; align-items: center; }
+.rowhead { color: var(--muted); font-size: 12px; padding: 0 12px 6px; line-height: 1.3; }
+.rowhead .yd, .rowhead .tr { text-align: right; }
+summary { padding: 10px 12px; cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+details[open] summary { background: var(--bg); }
+.no { color: var(--muted); font-variant-numeric: tabular-nums; }
+.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yd, .tr { text-align: right; font-variant-numeric: tabular-nums; }
+.tr { font-size: 14px; }
+.rank .card { border: 0; border-radius: 0; margin: 0; border-top: 1px dashed var(--line); }
+.more { display: block; width: 100%; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+        background: var(--card); color: var(--accent); font: inherit; cursor: pointer; }
 .empty { color: var(--muted); text-align: center; padding: 24px 0; }
 footer { color: var(--muted); font-size: 12px; margin-top: 20px; line-height: 1.6; }
 </style>
 </head>
 <body>
 <main>
-<h1>FCF 수익률 검색</h1>
+<h1>FCF 수익률 순위·검색</h1>
 <div class="tabs" id="tabs"></div>
 <input id="q" type="search" autocomplete="off" autocapitalize="off" spellcheck="false">
 <div id="meta"></div>
+<div class="lists" id="lists"><button class="list" data-l="main"></button><button class="list" data-l="advance"></button></div>
 <div id="out"></div>
 <footer>
 수익률 = 최근 4분기 FCF 합 ÷ 시총 · FCF = 영업활동현금흐름 − 유형자산 취득<br>
+4분기 FCF 증감 = 최근 4분기 합 대 그 전 4분기 합 (1년 전) · 종목을 누르면 자세히<br>
 순위는 금융업을 뺀 한국 시총 상위 300 / 미국 시총 상위 1000 안의 위치 (텔레그램 상위 50과 같은 순서)<br>
 ※ 자동 수집한 참고 자료이며 매수·매도 추천이 아닙니다.
 </footer>
@@ -66,9 +89,14 @@ function search(rows, query, limit) {
   hits.sort(function (a, b) { return a.exact - b.exact || (b.r.cap || 0) - (a.r.cap || 0); });
   return hits.slice(0, limit).map(function (h) { return h.r; });
 }
+function ranked(rows, group) {
+  return rows.filter(function (r) { return r.rank !== null && r.status === group; })
+    .sort(function (a, b) { return a.rank - b.rank; });
+}
 
 var DATA = JSON.parse(document.getElementById("data").textContent);
-var LIMIT = 30;
+var LIMIT = 30, PAGE = 50;
+var LIST = { main: "본 목록", advance: "선수금 업종" };
 var HINT = { kr: "종목 이름 또는 코드 (예: 하이닉스)", us: "티커 또는 이름 (예: AAPL, apple)" };
 var NAME = { kr: "🇰🇷 한국", us: "🇺🇸 미국" };
 var REASON = {
@@ -79,7 +107,7 @@ var REASON = {
   foreign: "외국 기업 (SEC 분기 자료 없음) · 순위 제외",
   missing: "자료 없음"
 };
-var country = DATA.kr ? "kr" : "us";
+var country = DATA.kr ? "kr" : "us", list = "main", shown = PAGE;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
@@ -118,16 +146,48 @@ function card(r, c) {
   }
   return h + "</article>";
 }
+// 순위 목록 한 줄. 누르면 검색 결과와 같은 카드가 펼쳐진다
+function line(r, c) {
+  var trend = "-";
+  if (r.ttm_pct !== null) trend = "<span class=\"chg " + (r.ttm_pct >= 0 ? "up" : "down") + "\">" + (r.ttm_pct >= 0 ? "+" : "") + Math.round(r.ttm_pct * 100) + "%</span>";
+  else if (r.ttm_delta !== null) trend = "<span class=\"chg up\">흑자 전환</span>";
+  return "<li><details><summary><span class=\"no\">" + r.rank + "</span><span class=\"nm\">" + esc(r.name) +
+    " <span class=\"code\">" + esc(r.code) + (r.late ? " ⏳" : "") + (r.warn ? " ⚠" : "") + "</span></span><b class=\"yd\">" + pct(r["yield"]) +
+    "</b><span class=\"tr\">" + trend + "</span></summary>" + card(r, c) + "</details></li>";
+}
+function showList(d, out) {
+  var all = ranked(d.rows, list);
+  document.querySelectorAll(".list").forEach(function (b) {
+    b.setAttribute("aria-pressed", b.dataset.l === list);
+    b.textContent = LIST[b.dataset.l] + " " + ranked(d.rows, b.dataset.l).length;
+  });
+  if (!all.length) { out.innerHTML = "<p class=\"empty\">순위에 든 종목이 없어요</p>"; return; }
+  out.innerHTML = "<div class=\"rowhead\"><span class=\"no\">순위</span><span class=\"nm\">종목</span><span class=\"yd\">FCF 수익률</span>" +
+    "<span class=\"tr\">4분기 FCF<br>증감</span></div><ol class=\"rank\" id=\"rank\"></ol>";
+  var ol = document.getElementById("rank"), done = 0;
+  function more() {
+    ol.insertAdjacentHTML("beforeend", all.slice(done, shown).map(function (r) { return line(r, country); }).join(""));
+    done = Math.min(shown, all.length);
+    var b = document.getElementById("more");
+    if (b) b.remove();
+    if (done < all.length) {
+      out.insertAdjacentHTML("beforeend", "<button class=\"more\" id=\"more\">더 보기 (" + done + " / " + all.length + ")</button>");
+      document.getElementById("more").onclick = function () { shown += PAGE; more(); };
+    }
+  }
+  more();
+}
 function show() {
   var d = DATA[country], q = document.getElementById("q").value;
   document.getElementById("meta").textContent = d.quarter + " · 시총 기준 " + d.cap_date + " · " + d.rows.length.toLocaleString("en-US") + "개 종목";
   var hits = search(d.rows, q, LIMIT), out = document.getElementById("out");
-  if (!norm(q)) out.innerHTML = "<p class=\"empty\">검색어를 입력하세요</p>";
+  document.getElementById("lists").hidden = !!norm(q);
+  if (!norm(q)) showList(d, out);
   else if (!hits.length) out.innerHTML = "<p class=\"empty\">찾는 종목이 없어요" + (country === "kr" ? " (한국은 시총 상위 300개만 있어요)" : "") + "</p>";
   else out.innerHTML = hits.map(function (r) { return card(r, country); }).join("");
 }
 function pick(c) {
-  country = c;
+  country = c; shown = PAGE;
   document.querySelectorAll(".tab").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.c === c); });
   document.getElementById("q").placeholder = HINT[c];
   show();
@@ -138,6 +198,9 @@ Object.keys(DATA).forEach(function (c) {
   b.className = "tab"; b.dataset.c = c; b.textContent = NAME[c];
   b.onclick = function () { pick(c); document.getElementById("q").focus(); };
   tabs.appendChild(b);
+});
+document.querySelectorAll(".list").forEach(function (b) {
+  b.onclick = function () { list = b.dataset.l; shown = PAGE; show(); };
 });
 document.getElementById("q").addEventListener("input", show);
 pick(country);
